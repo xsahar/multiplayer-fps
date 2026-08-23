@@ -2,6 +2,27 @@
 
 Use this file as a study and implementation path. Do not begin with a complete online shooter. Build a small version, test it, and add one system at a time.
 
+## Current Progress
+
+Status: `[x]` complete, `[~]` started but incomplete, `[ ]` not started.
+
+- [x] Cargo project with library, server binary, and client binary
+- [x] Shared `Player` and `Maze` types
+- [x] Fixed offline maze with walls, floor, safe tile lookup, and spawn lookup
+- [x] Basic movement and wall/boundary checks
+- [x] Binary serialization with Serde and bincode
+- [x] UDP server receives and decodes one client join packet
+- [x] UDP client sends one join packet
+- [x] Server sends and client decodes `JoinAccepted`
+- [ ] Continuous server loop and multiple connected players
+- [ ] Graphical client, raycasting, minimap, and FPS display
+
+### Next Session
+
+Implement a server loop that can receive more than one packet. Then store each
+joined client in a collection, reject duplicate usernames, and assign a unique
+player ID to each accepted client.
+
 ## How to Use This Guide
 
 For every milestone:

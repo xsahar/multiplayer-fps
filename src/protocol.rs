@@ -10,6 +10,7 @@ pub enum ClientMessage {
 pub enum ServerMessage {
     JoinAccepted { player_id: u32 },
     JoinRejected { reason: String },
+    Snapshot { player_id: u32, x: f32, y: f32 },
 }
 
 #[cfg(test)]

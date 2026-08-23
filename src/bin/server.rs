@@ -1,102 +1,118 @@
 use multiplayer_fps::common::{Maze, Player};
-use multiplayer_fps::protocol::ClientMessage;
-use std::io::{self, Write};
-use std::net::UdpSocket;
-
-
-fn print_maze(maze: &Maze, player: &Player) {
-    for (y, row) in maze.tiles.iter().enumerate() {
-        for (x, tile) in row.iter().enumerate() {
-            if player.x as usize == x && player.y as usize == y {
-                print!("P");
-            } else {
-                print!("{}", tile);
-            }
-        }
-        println!();
-    }
-}
+use multiplayer_fps::protocol::{ClientMessage, ServerMessage};
+use std::collections::{HashMap, HashSet};
+use std::net::{SocketAddr, UdpSocket};
 
 fn main() {
-
     let socket = UdpSocket::bind("127.0.0.1:34254")
         .expect("Could not bind server socket");
+
+    let mut clients: HashMap<SocketAddr, u32> = HashMap::new();
+    let mut usernames: HashSet<String> = HashSet::new();
+    let mut players: HashMap<SocketAddr, Player> = HashMap::new();
+    let maze = Maze::simple();
+    let mut next_player_id = 1;
         
     println!("Server starting...");
     println!("Server listening on 127.0.0.1:34254");
 
     let mut buffer = [0u8; 1024];
 
-    println!("Waiting for a UDP packet...");
-
-    let (amount, sender) = socket
-     .recv_from(&mut buffer)
-     .expect("Could not recive Udp packet");
-
-    println!("Received {} bytes from {}", amount, sender);
-
-    let (message, _bytes_read): (ClientMessage, usize) =
-        bincode::serde::decode_from_slice(
-            &buffer[..amount],
-            bincode::config::standard(),
-        )
-        .expect("Could not decode client message");
-
-    let username = match message {
-        ClientMessage::Join { username } => username,
-        ClientMessage::Input { .. } => {
-            println!("Expected a join message");
-            return;
-        }
-    };
-
-    let mut player = Player::new(username, 0.0, 0.0);
-
-    let maze = Maze::simple();
-
-    if let Some((spawn_x, spawn_y)) = maze.find_spawn(){
-        player.x = spawn_x as f32;
-        player.y = spawn_y as f32;
-    }
-
-    println!("Maze size: {}x{}", maze.width, maze.height);
-    println!("{} spawned at ({}, {})", player.name, player.x, player.y);
-    print_maze(&maze, &player);
+    println!("Waiting for UDP clients...");
 
     loop {
-    print!("Move with w/a/s/d, or q to quit: ");
-    io::stdout().flush().unwrap();
+        let (amount, sender) = socket
+            .recv_from(&mut buffer)
+            .expect("Could not receive UDP packet");
 
-    let mut input = String::new();
-    io::stdin().read_line(&mut input).unwrap();
+        println!("Received {} bytes from {}", amount, sender);
 
-    let command = input.trim();
+        let (message, _bytes_read): (ClientMessage, usize) =
+            match bincode::serde::decode_from_slice(
+                &buffer[..amount],
+                bincode::config::standard(),
+            ) {
+                Ok(message) => message,
+                Err(error) => {
+                    println!("Could not decode client message: {}", error);
+                    continue;
+                }
+            };
 
-    if command == "q" {
-        break;
-    }
+        match message {
+            ClientMessage::Join { username } => {
+                if usernames.contains(&username){
+                    send_message(
+                        &socket,
+                        sender,
+                        &ServerMessage::JoinRejected{
+                            reason: String::from("USername already taken"),
+                        },
+                    );
+                    println!("Rejected duplicate username: {}", username);
+                    continue;
+                }
 
-    let (direction, change_x, change_y) = match command {
-        "w" => ("up", 0, -1),
-        "a" => ("left", -1, 0),
-        "s" => ("down", 0, 1),
-        "d" => ("right", 1, 0),
-        _ => {
-            println!("Unknown command");
-            continue;
+                usernames.insert(username.clone());
+
+                let player_id = next_player_id;
+                next_player_id += 1;
+
+                let mut player = Player::new(username.clone(), 0.0, 0.0);
+                if let Some((spawn_x, spawn_y)) = maze.find_spawn() {
+                    player.x = spawn_x as f32;
+                    player.y = spawn_y as f32;
+                }
+
+                clients.insert(sender, player_id);
+                players.insert(sender, player);
+
+                send_message(
+                    &socket,
+                    sender,
+                    &ServerMessage::JoinAccepted { player_id },
+                );
+
+                println!("{} joined with ID {}", username, player_id);
+                println!("Connected clients: {}", clients.len());
+            }
+            ClientMessage::Input { change_x, change_y } => {
+                let Some(player_id) = clients.get(&sender).copied() else {
+                    println!("Ignoring input from unknown client {}", sender);
+                    continue;
+                };
+
+                let Some(player) = players.get_mut(&sender) else {
+                    continue;
+                };
+
+                let moved = maze.move_player(
+                    player,
+                    change_x as isize,
+                    change_y as isize,
+                );
+
+                println!("Input from {}: moved={}", player.name, moved);
+
+                send_message(
+                    &socket,
+                    sender,
+                    &ServerMessage::Snapshot {
+                        player_id,
+                        x: player.x,
+                        y: player.y,
+                    },
+                );
+            }
         }
-    };
-
-    let moved = maze.move_player(&mut player, change_x, change_y);
-
-    if moved {
-        println!("Moved {}", direction);
-    } else {
-        println!("Blocked moving {}", direction);
     }
+}
 
-        println!("Position ({}, {})", player.x, player.y);
-        print_maze(&maze, &player);
-    }
+fn send_message(socket: &UdpSocket, recipient: SocketAddr, message: &ServerMessage) {
+    let bytes = bincode::serde::encode_to_vec(message, bincode::config::standard())
+        .expect("Could not encode server message");
 
+    socket
+        .send_to(&bytes, recipient)
+        .expect("Could not send server message");
 }
