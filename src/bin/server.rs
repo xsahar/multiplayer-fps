@@ -2,17 +2,31 @@ use multiplayer_fps::common::{Maze, Player};
 use multiplayer_fps::protocol::{ClientMessage, ServerMessage};
 use std::collections::{HashMap, HashSet};
 use std::net::{SocketAddr, UdpSocket};
+use std::time::{Duration, Instant};
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum GamePhase {
+    Lobby,
+    Playing,
+}
 
 fn main() {
     let socket = UdpSocket::bind("127.0.0.1:34254")
         .expect("Could not bind server socket");
+    socket
+        .set_nonblocking(true)
+        .expect("Could not set UDP socket nonblocking");
 
     let mut clients: HashMap<SocketAddr, u32> = HashMap::new();
     let mut usernames: HashSet<String> = HashSet::new();
     let mut players: HashMap<SocketAddr, Player> = HashMap::new();
     let maze = Maze::simple();
     let mut next_player_id = 1;
-        
+    let mut game_phase = GamePhase::Lobby;
+    let mut lobby_countdown = 10u32;
+    let mut match_time_remaining = 30u32;
+    let mut last_tick = Instant::now();
+
     println!("Server starting...");
     println!("Server listening on 127.0.0.1:34254");
 
@@ -21,9 +35,41 @@ fn main() {
     println!("Waiting for UDP clients...");
 
     loop {
-        let (amount, sender) = socket
-            .recv_from(&mut buffer)
-            .expect("Could not receive UDP packet");
+        if game_phase == GamePhase::Lobby && !players.is_empty() {
+            if last_tick.elapsed() >= Duration::from_secs(1) {
+                lobby_countdown = lobby_countdown.saturating_sub(1);
+                last_tick = Instant::now();
+                broadcast_lobby_state(&socket, &clients, &usernames, lobby_countdown);
+                println!("Lobby countdown: {}", lobby_countdown);
+
+                if lobby_countdown == 0 {
+                    game_phase = GamePhase::Playing;
+                    match_time_remaining = 30;
+                    reset_players_for_match(&mut players, &maze);
+                    broadcast_snapshots(&socket, &clients, &players);
+                    println!("Match started");
+                }
+            }
+        } else if game_phase == GamePhase::Playing {
+            if last_tick.elapsed() >= Duration::from_secs(1) {
+                match_time_remaining = match_time_remaining.saturating_sub(1);
+                last_tick = Instant::now();
+                println!("Match time remaining: {}", match_time_remaining);
+
+                if match_time_remaining == 0 {
+                    game_phase = GamePhase::Lobby;
+                    lobby_countdown = 10;
+                    reset_players_for_match(&mut players, &maze);
+                    broadcast_lobby_state(&socket, &clients, &usernames, lobby_countdown);
+                    broadcast_snapshots(&socket, &clients, &players);
+                    println!("Round ended; lobby restarted");
+                }
+            }
+        }
+
+        let Ok((amount, sender)) = socket.recv_from(&mut buffer) else {
+            continue;
+        };
 
         println!("Received {} bytes from {}", amount, sender);
 
@@ -41,12 +87,12 @@ fn main() {
 
         match message {
             ClientMessage::Join { username } => {
-                if usernames.contains(&username){
+                if usernames.contains(&username) {
                     send_message(
                         &socket,
                         sender,
-                        &ServerMessage::JoinRejected{
-                            reason: String::from("USername already taken"),
+                        &ServerMessage::JoinRejected {
+                            reason: String::from("Username already taken"),
                         },
                     );
                     println!("Rejected duplicate username: {}", username);
@@ -73,8 +119,12 @@ fn main() {
                     &ServerMessage::JoinAccepted { player_id },
                 );
 
+                broadcast_snapshots(&socket, &clients, &players);
+                broadcast_lobby_state(&socket, &clients, &usernames, lobby_countdown);
+
                 println!("{} joined with ID {}", username, player_id);
                 println!("Connected clients: {}", clients.len());
+                println!("Current phase: {:?}", game_phase);
             }
             ClientMessage::Input { change_x, change_y } => {
                 let Some(player_id) = clients.get(&sender).copied() else {
@@ -94,16 +144,73 @@ fn main() {
 
                 println!("Input from {}: moved={}", player.name, moved);
 
+                if game_phase == GamePhase::Playing {
+                    broadcast_snapshots(&socket, &clients, &players);
+                }
+
+                let _ = player_id;
+            }
+            ClientMessage::Ping { id } => {
                 send_message(
                     &socket,
                     sender,
-                    &ServerMessage::Snapshot {
-                        player_id,
-                        x: player.x,
-                        y: player.y,
-                    },
+                    &ServerMessage::Pong { id },
                 );
+                println!("Pong sent to {} for ping {}", sender, id);
             }
+        }
+    }
+}
+
+fn reset_players_for_match(players: &mut HashMap<SocketAddr, Player>, maze: &Maze) {
+    for player in players.values_mut() {
+        if let Some((spawn_x, spawn_y)) = maze.find_spawn() {
+            player.x = spawn_x as f32;
+            player.y = spawn_y as f32;
+        }
+    }
+}
+
+fn broadcast_lobby_state(
+    socket: &UdpSocket,
+    clients: &HashMap<SocketAddr, u32>,
+    usernames: &HashSet<String>,
+    countdown: u32,
+) {
+    let players: Vec<String> = usernames.iter().cloned().collect();
+
+    for recipient in clients.keys() {
+        send_message(
+            socket,
+            *recipient,
+            &ServerMessage::LobbyState {
+                players: players.clone(),
+                countdown,
+            },
+        );
+    }
+}
+
+fn broadcast_snapshots(
+    socket: &UdpSocket,
+    clients: &HashMap<SocketAddr, u32>,
+    players: &HashMap<SocketAddr, Player>,
+) {
+    for (recipient, _) in clients {
+        for (client_addr, player) in players {
+            let Some(player_id) = clients.get(client_addr) else {
+                continue;
+            };
+
+            send_message(
+                socket,
+                *recipient,
+                &ServerMessage::Snapshot {
+                    player_id: *player_id,
+                    x: player.x,
+                    y: player.y,
+                },
+            );
         }
     }
 }

@@ -14,14 +14,21 @@ Status: `[x]` complete, `[~]` started but incomplete, `[ ]` not started.
 - [x] UDP server receives and decodes one client join packet
 - [x] UDP client sends one join packet
 - [x] Server sends and client decodes `JoinAccepted`
-- [ ] Continuous server loop and multiple connected players
-- [ ] Graphical client, raycasting, minimap, and FPS display
+- [x] Continuous server loop and multiple connected players
+- [x] Snapshot broadcast to connected clients after move and after join
+- [x] Minimal client-side snapshot processing loop for state updates
+- [x] Continuous client message loop while the app is running
+- [x] Ping and pong protocol messages for connection health checks
+- [x] Basic lobby state and phase tracking on the server
+- [x] Round reset and match-start flow
+- [x] Minimal graphical client window with maze and player drawing
+- [x] First raycast pass with wall distance and vertical wall strips
+- [~] Minimap and FPS display
 
 ### Next Session
 
-Implement a server loop that can receive more than one packet. Then store each
-joined client in a collection, reject duplicate usernames, and assign a unique
-player ID to each accepted client.
+Add player camera rotation, then finish the minimap and FPS overlay on top of
+the raycast view.
 
 ## How to Use This Guide
 

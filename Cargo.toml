@@ -6,3 +6,4 @@ edition = "2024"
 [dependencies]
 serde = { version = "1", features = ["derive"] }
 bincode = { version = "2", features = ["serde"] }
+macroquad = "0.4"
