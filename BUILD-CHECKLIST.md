@@ -23,12 +23,13 @@ Status: `[x]` complete, `[~]` started but incomplete, `[ ]` not started.
 - [x] Round reset and match-start flow
 - [x] Minimal graphical client window with maze and player drawing
 - [x] First raycast pass with wall distance and vertical wall strips
-- [~] Minimap and FPS display
+- [x] Keyboard camera rotation for the raycast view
+- [x] Minimap and FPS display
 
 ### Next Session
 
-Add player camera rotation, then finish the minimap and FPS overlay on top of
-the raycast view.
+Improve movement and camera input for the playable client: replace the current
+automatic movement with keyboard-controlled forward, backward, and strafe input.
 
 ## How to Use This Guide
 

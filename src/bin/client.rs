@@ -40,11 +40,10 @@ fn wall_distance(maze: &Maze, start_x: f32, start_y: f32, angle: f32) -> f32 {
     20.0
 }
 
-fn draw_raycast_view(maze: &Maze, player_position: (f32, f32)) {
+fn draw_raycast_view(maze: &Maze, player_position: (f32, f32), player_angle: f32) {
     let view_width = screen_width() * 0.68;
     let view_height = screen_height();
     let field_of_view = std::f32::consts::FRAC_PI_2;
-    let player_angle = 0.0;
 
     draw_rectangle(0.0, 0.0, view_width, view_height * 0.5, color_u8!(35, 45, 60, 255));
     draw_rectangle(
@@ -103,6 +102,16 @@ fn draw_maze(maze: &Maze, players: &HashMap<u32, (f32, f32)>, my_player_id: Opti
     let tile_size = 18.0;
     let offset_x = screen_width() * 0.72;
     let offset_y = 90.0;
+    let map_width = maze.width as f32 * tile_size;
+    let map_height = maze.height as f32 * tile_size;
+
+    draw_rectangle(
+        offset_x - 8.0,
+        offset_y - 8.0,
+        map_width + 16.0,
+        map_height + 16.0,
+        color_u8!(20, 25, 30, 220),
+    );
 
     for (y, row) in maze.tiles.iter().enumerate() {
         for (x, cell) in row.iter().enumerate() {
@@ -132,6 +141,24 @@ fn draw_maze(maze: &Maze, players: &HashMap<u32, (f32, f32)>, my_player_id: Opti
     draw_text("Map", offset_x, offset_y - 12.0, 18.0, WHITE);
 }
 
+fn draw_hud(players: &HashMap<u32, (f32, f32)>, player_angle: f32) {
+    draw_text(&format!("FPS: {}", get_fps()), 20.0, 58.0, 20.0, WHITE);
+    draw_text(
+        &format!("Players: {}", players.len()),
+        20.0,
+        82.0,
+        20.0,
+        WHITE,
+    );
+    draw_text(
+        &format!("Angle: {:.2}", player_angle),
+        20.0,
+        106.0,
+        20.0,
+        WHITE,
+    );
+}
+
 #[macroquad::main("Multiplayer FPS")]
 async fn main() {
     let socket = UdpSocket::bind("127.0.0.1:0").expect("Could not bind client socket");
@@ -157,6 +184,7 @@ async fn main() {
     let mut my_player_id = None;
     let mut joined = false;
     let mut next_input_at = Instant::now();
+    let mut player_angle = 0.0;
     let maze = Maze::simple();
 
     while !joined {
@@ -186,6 +214,14 @@ async fn main() {
     }
 
     loop {
+        let rotation_speed = 2.5 * get_frame_time();
+        if is_key_down(KeyCode::A) {
+            player_angle -= rotation_speed;
+        }
+        if is_key_down(KeyCode::D) {
+            player_angle += rotation_speed;
+        }
+
         if next_input_at.elapsed() >= Duration::from_millis(200) {
             let input = ClientMessage::Input {
                 change_x: 1,
@@ -234,8 +270,9 @@ async fn main() {
         let player_position = my_player_id
             .and_then(|player_id| players.get(&player_id).copied())
             .unwrap_or((1.5, 1.5));
-        draw_raycast_view(&maze, player_position);
+        draw_raycast_view(&maze, player_position, player_angle);
         draw_maze(&maze, &players, my_player_id);
+        draw_hud(&players, player_angle);
         next_frame().await;
     }
 }
@@ -250,5 +287,13 @@ mod tests {
         let distance = wall_distance(&maze, 1.5, 1.5, 0.0);
 
         assert!((distance - 2.5).abs() < 0.03);
+    }
+
+    #[test]
+    fn ray_hits_the_north_wall_after_rotation() {
+        let maze = Maze::simple();
+        let distance = wall_distance(&maze, 1.5, 1.5, -std::f32::consts::FRAC_PI_2);
+
+        assert!((distance - 0.5).abs() < 0.03);
     }
 }
