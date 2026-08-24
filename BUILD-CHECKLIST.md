@@ -25,11 +25,11 @@ Status: `[x]` complete, `[~]` started but incomplete, `[ ]` not started.
 - [x] First raycast pass with wall distance and vertical wall strips
 - [x] Keyboard camera rotation for the raycast view
 - [x] Minimap and FPS display
+- [x] Keyboard movement (W/S forward/back, Q/E strafe left/right) with angle-aware direction
 
 ### Next Session
 
-Improve movement and camera input for the playable client: replace the current
-automatic movement with keyboard-controlled forward, backward, and strafe input.
+Implement combat mechanics: fire button, raycast-to-player collision detection, health tracking, and death state.
 
 ## How to Use This Guide
 

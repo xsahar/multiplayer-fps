@@ -16,6 +16,29 @@ fn read_server_message(socket: &UdpSocket, buffer: &mut [u8]) -> Option<ServerMe
     Some(message)
 }
 
+fn calculate_movement(player_angle: f32) -> (i8, i8) {
+    let forward = is_key_down(KeyCode::W) as i8 - is_key_down(KeyCode::S) as i8;
+    let strafe = is_key_down(KeyCode::Q) as i8 - is_key_down(KeyCode::E) as i8;
+
+    if forward == 0 && strafe == 0 {
+        return (0, 0);
+    }
+
+    let move_angle = if strafe != 0 {
+        player_angle + strafe as f32 * std::f32::consts::FRAC_PI_2
+    } else {
+        player_angle + if forward > 0 { 0.0 } else { std::f32::consts::PI }
+    };
+
+    let move_x = move_angle.cos();
+    let move_y = move_angle.sin();
+
+    let change_x = (move_x * forward as f32).round() as i8;
+    let change_y = (move_y * forward as f32).round() as i8;
+
+    (change_x, change_y)
+}
+
 fn wall_distance(maze: &Maze, start_x: f32, start_y: f32, angle: f32) -> f32 {
     let direction_x = angle.cos();
     let direction_y = angle.sin();
@@ -223,9 +246,10 @@ async fn main() {
         }
 
         if next_input_at.elapsed() >= Duration::from_millis(200) {
+            let (change_x, change_y) = calculate_movement(player_angle);
             let input = ClientMessage::Input {
-                change_x: 1,
-                change_y: 0,
+                change_x,
+                change_y,
             };
             let input_bytes = bincode::serde::encode_to_vec(
                 &input,
