@@ -1,8 +1,0 @@
----
-description: Execute tasks sequentially and track progress in status file
-alwaysApply: true
----
-1. Read `PROJECT-STATUS.md` first to locate the next unchecked task (`[ ]`).
-2. Implement strictly ONE task at a time.
-3. Run `cargo check` to verify compilation.
-4. Update `PROJECT-STATUS.md` to mark finished tasks (`[x]`).

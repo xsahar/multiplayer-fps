@@ -25,24 +25,48 @@ fn read_server_message(socket: &UdpSocket, buffer: &mut [u8]) -> Option<ServerMe
 }
 
 fn calculate_movement(player_angle: f32) -> (i8, i8) {
-    let forward = is_key_down(KeyCode::W) as i8 - is_key_down(KeyCode::S) as i8;
-    let strafe = is_key_down(KeyCode::Q) as i8 - is_key_down(KeyCode::E) as i8;
+    let forward = if is_key_down(KeyCode::W) {
+        1
+    } else if is_key_down(KeyCode::S) {
+        -1
+    } else {
+        0
+    };
+    let strafe = if is_key_down(KeyCode::Q) {
+        1
+    } else if is_key_down(KeyCode::E) {
+        -1
+    } else {
+        0
+    };
 
     if forward == 0 && strafe == 0 {
         return (0, 0);
     }
 
-    let move_angle = if strafe != 0 {
-        player_angle + strafe as f32 * std::f32::consts::FRAC_PI_2
+    let forward_x = forward as f32 * player_angle.cos();
+    let forward_y = forward as f32 * player_angle.sin();
+    let strafe_angle = player_angle + std::f32::consts::FRAC_PI_2;
+    let strafe_x = strafe as f32 * strafe_angle.cos();
+    let strafe_y = strafe as f32 * strafe_angle.sin();
+
+    let move_x = forward_x + strafe_x;
+    let move_y = forward_y + strafe_y;
+
+    let change_x = if move_x > 0.25 {
+        1
+    } else if move_x < -0.25 {
+        -1
     } else {
-        player_angle + if forward > 0 { 0.0 } else { std::f32::consts::PI }
+        0
     };
-
-    let move_x = move_angle.cos();
-    let move_y = move_angle.sin();
-
-    let change_x = (move_x * forward as f32).round() as i8;
-    let change_y = (move_y * forward as f32).round() as i8;
+    let change_y = if move_y > 0.25 {
+        1
+    } else if move_y < -0.25 {
+        -1
+    } else {
+        0
+    };
 
     (change_x, change_y)
 }
@@ -299,6 +323,9 @@ fn apply_server_message(
             }
             println!("Player {} was killed by {}", player_id, killer_id);
         }
+        ServerMessage::MatchOver { standings } => {
+            println!("Match over! Standings: {:?}", standings);
+        }
     }
 }
 
@@ -347,10 +374,10 @@ async fn main() {
 
     loop {
         let rotation_speed = 2.5 * get_frame_time();
-        if is_key_down(KeyCode::A) {
+        if is_key_down(KeyCode::A) || is_key_down(KeyCode::Left) {
             player_angle -= rotation_speed;
         }
-        if is_key_down(KeyCode::D) {
+        if is_key_down(KeyCode::D) || is_key_down(KeyCode::Right) {
             player_angle += rotation_speed;
         }
 
