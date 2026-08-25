@@ -1,9 +1,17 @@
 use macroquad::prelude::*;
-use multiplayer_fps::common::Maze;
+use multiplayer_fps::common::{raycast_to_player, Maze, MAX_HEALTH};
 use multiplayer_fps::protocol::{ClientMessage, ServerMessage};
 use std::collections::HashMap;
 use std::net::UdpSocket;
 use std::time::{Duration, Instant};
+
+#[derive(Clone, Copy)]
+struct PlayerView {
+    x: f32,
+    y: f32,
+    health: u8,
+    alive: bool,
+}
 
 fn read_server_message(socket: &UdpSocket, buffer: &mut [u8]) -> Option<ServerMessage> {
     let (amount, _) = socket.recv_from(buffer).ok()?;
@@ -63,7 +71,12 @@ fn wall_distance(maze: &Maze, start_x: f32, start_y: f32, angle: f32) -> f32 {
     20.0
 }
 
-fn draw_raycast_view(maze: &Maze, player_position: (f32, f32), player_angle: f32) {
+fn draw_raycast_view(
+    maze: &Maze,
+    player_position: (f32, f32),
+    player_angle: f32,
+    aiming_at_player: bool,
+) {
     let view_width = screen_width() * 0.68;
     let view_height = screen_height();
     let field_of_view = std::f32::consts::FRAC_PI_2;
@@ -103,13 +116,18 @@ fn draw_raycast_view(maze: &Maze, player_position: (f32, f32), player_angle: f32
         screen_x += column_width;
     }
 
+    let crosshair = if aiming_at_player {
+        color_u8!(220, 80, 80, 255)
+    } else {
+        WHITE
+    };
     draw_line(
         view_width * 0.5 - 8.0,
         view_height * 0.5,
         view_width * 0.5 + 8.0,
         view_height * 0.5,
         2.0,
-        WHITE,
+        crosshair,
     );
     draw_line(
         view_width * 0.5,
@@ -117,11 +135,11 @@ fn draw_raycast_view(maze: &Maze, player_position: (f32, f32), player_angle: f32
         view_width * 0.5,
         view_height * 0.5 + 8.0,
         2.0,
-        WHITE,
+        crosshair,
     );
 }
 
-fn draw_maze(maze: &Maze, players: &HashMap<u32, (f32, f32)>, my_player_id: Option<u32>) {
+fn draw_maze(maze: &Maze, players: &HashMap<u32, PlayerView>, my_player_id: Option<u32>) {
     let tile_size = 18.0;
     let offset_x = screen_width() * 0.72;
     let offset_y = 90.0;
@@ -149,13 +167,15 @@ fn draw_maze(maze: &Maze, players: &HashMap<u32, (f32, f32)>, my_player_id: Opti
         }
     }
 
-    for (player_id, (x, y)) in players {
-        let px = offset_x + x * tile_size + tile_size * 0.5;
-        let py = offset_y + y * tile_size + tile_size * 0.5;
+    for (player_id, player) in players {
+        let px = offset_x + player.x * tile_size + tile_size * 0.5;
+        let py = offset_y + player.y * tile_size + tile_size * 0.5;
         let color = if Some(*player_id) == my_player_id {
             color_u8!(120, 220, 120, 255)
-        } else {
+        } else if player.alive {
             color_u8!(220, 120, 120, 255)
+        } else {
+            color_u8!(90, 90, 90, 255)
         };
         draw_circle(px, py, 7.0, color);
     }
@@ -164,7 +184,16 @@ fn draw_maze(maze: &Maze, players: &HashMap<u32, (f32, f32)>, my_player_id: Opti
     draw_text("Map", offset_x, offset_y - 12.0, 18.0, WHITE);
 }
 
-fn draw_hud(players: &HashMap<u32, (f32, f32)>, player_angle: f32) {
+fn draw_hud(
+    players: &HashMap<u32, PlayerView>,
+    my_player_id: Option<u32>,
+    player_angle: f32,
+    aiming_at_player: bool,
+) {
+    let me = my_player_id.and_then(|id| players.get(&id));
+    let health = me.map(|player| player.health).unwrap_or(MAX_HEALTH);
+    let alive = me.map(|player| player.alive).unwrap_or(true);
+
     draw_text(&format!("FPS: {}", get_fps()), 20.0, 58.0, 20.0, WHITE);
     draw_text(
         &format!("Players: {}", players.len()),
@@ -180,6 +209,97 @@ fn draw_hud(players: &HashMap<u32, (f32, f32)>, player_angle: f32) {
         20.0,
         WHITE,
     );
+    draw_text(
+        &format!("HP: {}", health),
+        20.0,
+        130.0,
+        20.0,
+        if health > 30 {
+            WHITE
+        } else {
+            color_u8!(220, 80, 80, 255)
+        },
+    );
+    if !alive {
+        draw_text("DEAD - wait for next round", 20.0, 154.0, 20.0, RED);
+    }
+    if aiming_at_player {
+        draw_text("Target", 20.0, 178.0, 20.0, color_u8!(220, 80, 80, 255));
+    }
+}
+
+fn apply_server_message(
+    message: ServerMessage,
+    players: &mut HashMap<u32, PlayerView>,
+    my_player_id: &mut Option<u32>,
+) {
+    match message {
+        ServerMessage::Snapshot {
+            player_id,
+            x,
+            y,
+            health,
+            alive,
+        } => {
+            players.insert(
+                player_id,
+                PlayerView {
+                    x,
+                    y,
+                    health,
+                    alive,
+                },
+            );
+        }
+        ServerMessage::LobbyState {
+            players: _,
+            countdown,
+        } => {
+            println!("Lobby countdown: {}", countdown);
+        }
+        ServerMessage::Pong { id } => {
+            println!("Pong for {}", id);
+        }
+        ServerMessage::JoinAccepted { player_id } => {
+            *my_player_id = Some(player_id);
+            players.insert(
+                player_id,
+                PlayerView {
+                    x: 0.0,
+                    y: 0.0,
+                    health: MAX_HEALTH,
+                    alive: true,
+                },
+            );
+        }
+        ServerMessage::JoinRejected { reason } => {
+            println!("Rejected: {}", reason);
+        }
+        ServerMessage::PlayerHit {
+            shooter_id,
+            target_id,
+            health,
+        } => {
+            if let Some(target) = players.get_mut(&target_id) {
+                target.health = health;
+                target.alive = health > 0;
+            }
+            println!(
+                "Hit: shooter {} -> target {} (hp {})",
+                shooter_id, target_id, health
+            );
+        }
+        ServerMessage::PlayerDied {
+            player_id,
+            killer_id,
+        } => {
+            if let Some(target) = players.get_mut(&player_id) {
+                target.health = 0;
+                target.alive = false;
+            }
+            println!("Player {} was killed by {}", player_id, killer_id);
+        }
+    }
 }
 
 #[macroquad::main("Multiplayer FPS")]
@@ -203,7 +323,7 @@ async fn main() {
         .expect("Could not send join message");
 
     let mut buffer = [0u8; 1024];
-    let mut players: HashMap<u32, (f32, f32)> = HashMap::new();
+    let mut players: HashMap<u32, PlayerView> = HashMap::new();
     let mut my_player_id = None;
     let mut joined = false;
     let mut next_input_at = Instant::now();
@@ -212,26 +332,15 @@ async fn main() {
 
     while !joined {
         if let Some(message) = read_server_message(&socket, &mut buffer) {
-            match message {
-                ServerMessage::JoinAccepted { player_id } => {
-                    my_player_id = Some(player_id);
-                    players.insert(player_id, (0.0, 0.0));
-                    joined = true;
-                    println!("Join accepted: {}", player_id);
-                }
-                ServerMessage::JoinRejected { reason } => {
-                    println!("Rejected: {}", reason);
-                    return;
-                }
-                ServerMessage::Snapshot { player_id, x, y } => {
-                    players.insert(player_id, (x, y));
-                }
-                ServerMessage::LobbyState { players: _, countdown } => {
-                    println!("Lobby countdown: {}", countdown);
-                }
-                ServerMessage::Pong { id } => {
-                    println!("Pong for {}", id);
-                }
+            if let ServerMessage::JoinRejected { reason } = &message {
+                println!("Rejected: {}", reason);
+                return;
+            }
+            let accepted = matches!(message, ServerMessage::JoinAccepted { .. });
+            apply_server_message(message, &mut players, &mut my_player_id);
+            if accepted {
+                joined = true;
+                println!("Join accepted: {}", my_player_id.unwrap());
             }
         }
     }
@@ -245,7 +354,24 @@ async fn main() {
             player_angle += rotation_speed;
         }
 
-        if next_input_at.elapsed() >= Duration::from_millis(200) {
+        let alive = my_player_id
+            .and_then(|id| players.get(&id))
+            .map(|player| player.alive)
+            .unwrap_or(true);
+
+        if alive && is_key_pressed(KeyCode::Space) {
+            let fire = ClientMessage::Fire {
+                angle: player_angle,
+            };
+            let fire_bytes = bincode::serde::encode_to_vec(&fire, bincode::config::standard())
+                .expect("Could not encode fire message");
+
+            socket
+                .send_to(&fire_bytes, "127.0.0.1:34254")
+                .expect("Could not send fire message");
+        }
+
+        if alive && next_input_at.elapsed() >= Duration::from_millis(200) {
             let (change_x, change_y) = calculate_movement(player_angle);
             let input = ClientMessage::Input {
                 change_x,
@@ -270,33 +396,35 @@ async fn main() {
             )
             .expect("Could not decode snapshot");
 
-            match message {
-                ServerMessage::Snapshot { player_id, x, y } => {
-                    players.insert(player_id, (x, y));
-                }
-                ServerMessage::LobbyState { players: _, countdown } => {
-                    println!("Lobby countdown: {}", countdown);
-                }
-                ServerMessage::Pong { id } => {
-                    println!("Pong for {}", id);
-                }
-                ServerMessage::JoinAccepted { player_id } => {
-                    my_player_id = Some(player_id);
-                    players.insert(player_id, (0.0, 0.0));
-                }
-                ServerMessage::JoinRejected { reason } => {
-                    println!("Rejected: {}", reason);
-                }
-            }
+            apply_server_message(message, &mut players, &mut my_player_id);
         }
 
         clear_background(BLACK);
         let player_position = my_player_id
             .and_then(|player_id| players.get(&player_id).copied())
+            .map(|player| (player.x, player.y))
             .unwrap_or((1.5, 1.5));
-        draw_raycast_view(&maze, player_position, player_angle);
+        let targets: Vec<(u32, f32, f32)> = players
+            .iter()
+            .filter_map(|(id, player)| {
+                if Some(*id) == my_player_id || !player.alive {
+                    None
+                } else {
+                    Some((*id, player.x, player.y))
+                }
+            })
+            .collect();
+        let aiming_at_player = raycast_to_player(
+            &maze,
+            player_position.0,
+            player_position.1,
+            player_angle,
+            &targets,
+        )
+        .is_some();
+        draw_raycast_view(&maze, player_position, player_angle, aiming_at_player);
         draw_maze(&maze, &players, my_player_id);
-        draw_hud(&players, player_angle);
+        draw_hud(&players, my_player_id, player_angle, aiming_at_player);
         next_frame().await;
     }
 }

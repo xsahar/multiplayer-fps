@@ -1,4 +1,4 @@
-use multiplayer_fps::common::{Maze, Player};
+use multiplayer_fps::common::{raycast_to_player, Maze, Player};
 use multiplayer_fps::protocol::{ClientMessage, ServerMessage};
 use std::collections::{HashMap, HashSet};
 use std::net::{SocketAddr, UdpSocket};
@@ -136,6 +136,11 @@ fn main() {
                     continue;
                 };
 
+                if !player.alive {
+                    println!("Ignoring input from dead player {}", player.name);
+                    continue;
+                }
+
                 let moved = maze.move_player(
                     player,
                     change_x as isize,
@@ -158,16 +163,125 @@ fn main() {
                 );
                 println!("Pong sent to {} for ping {}", sender, id);
             }
+            ClientMessage::Fire { angle } => {
+                handle_fire(
+                    &socket,
+                    sender,
+                    angle,
+                    game_phase,
+                    &clients,
+                    &mut players,
+                    &maze,
+                );
+            }
         }
+    }
+}
+
+fn handle_fire(
+    socket: &UdpSocket,
+    sender: SocketAddr,
+    angle: f32,
+    game_phase: GamePhase,
+    clients: &HashMap<SocketAddr, u32>,
+    players: &mut HashMap<SocketAddr, Player>,
+    maze: &Maze,
+) {
+    if game_phase != GamePhase::Playing {
+        return;
+    }
+
+    let Some(shooter_id) = clients.get(&sender).copied() else {
+        println!("Ignoring fire from unknown client {}", sender);
+        return;
+    };
+
+    let Some(shooter) = players.get(&sender) else {
+        return;
+    };
+
+    if !shooter.alive {
+        println!("Ignoring fire from dead player {}", shooter.name);
+        return;
+    }
+
+    let start_x = shooter.x;
+    let start_y = shooter.y;
+    let shooter_name = shooter.name.clone();
+
+    let targets: Vec<(u32, f32, f32)> = players
+        .iter()
+        .filter_map(|(addr, player)| {
+            if *addr == sender || !player.alive {
+                return None;
+            }
+            let player_id = *clients.get(addr)?;
+            Some((player_id, player.x, player.y))
+        })
+        .collect();
+
+    let Some((target_id, distance)) = raycast_to_player(maze, start_x, start_y, angle, &targets)
+    else {
+        println!("Player {} fired at angle {} and missed", shooter_name, angle);
+        return;
+    };
+
+    let Some(target_addr) = clients
+        .iter()
+        .find_map(|(addr, id)| (*id == target_id).then_some(*addr))
+    else {
+        return;
+    };
+
+    let Some(target) = players.get_mut(&target_addr) else {
+        return;
+    };
+
+    let died = target.apply_hit();
+    let health = target.health;
+    let target_name = target.name.clone();
+
+    if died {
+        if let Some(shooter) = players.get_mut(&sender) {
+            shooter.kills += 1;
+        }
+    }
+
+    broadcast_message(
+        socket,
+        clients,
+        &ServerMessage::PlayerHit {
+            shooter_id,
+            target_id,
+            health,
+        },
+    );
+
+    if died {
+        broadcast_message(
+            socket,
+            clients,
+            &ServerMessage::PlayerDied {
+                player_id: target_id,
+                killer_id: shooter_id,
+            },
+        );
+        println!(
+            "Player {} killed {} at distance {:.2}",
+            shooter_name, target_name, distance
+        );
+    } else {
+        println!(
+            "Player {} hit {} for 10 HP ({} remaining, distance {:.2})",
+            shooter_name, target_name, health, distance
+        );
     }
 }
 
 fn reset_players_for_match(players: &mut HashMap<SocketAddr, Player>, maze: &Maze) {
     for player in players.values_mut() {
-        if let Some((spawn_x, spawn_y)) = maze.find_spawn() {
-            player.x = spawn_x as f32;
-            player.y = spawn_y as f32;
-        }
+        let (spawn_x, spawn_y) = maze.find_spawn().unwrap_or((1, 1));
+        player.respawn_for_round(spawn_x as f32, spawn_y as f32);
     }
 }
 
@@ -179,16 +293,14 @@ fn broadcast_lobby_state(
 ) {
     let players: Vec<String> = usernames.iter().cloned().collect();
 
-    for recipient in clients.keys() {
-        send_message(
-            socket,
-            *recipient,
-            &ServerMessage::LobbyState {
-                players: players.clone(),
-                countdown,
-            },
-        );
-    }
+    broadcast_message(
+        socket,
+        clients,
+        &ServerMessage::LobbyState {
+            players,
+            countdown,
+        },
+    );
 }
 
 fn broadcast_snapshots(
@@ -196,7 +308,7 @@ fn broadcast_snapshots(
     clients: &HashMap<SocketAddr, u32>,
     players: &HashMap<SocketAddr, Player>,
 ) {
-    for (recipient, _) in clients {
+    for recipient in clients.keys() {
         for (client_addr, player) in players {
             let Some(player_id) = clients.get(client_addr) else {
                 continue;
@@ -209,9 +321,21 @@ fn broadcast_snapshots(
                     player_id: *player_id,
                     x: player.x,
                     y: player.y,
+                    health: player.health,
+                    alive: player.alive,
                 },
             );
         }
+    }
+}
+
+fn broadcast_message(
+    socket: &UdpSocket,
+    clients: &HashMap<SocketAddr, u32>,
+    message: &ServerMessage,
+) {
+    for recipient in clients.keys() {
+        send_message(socket, *recipient, message);
     }
 }
 

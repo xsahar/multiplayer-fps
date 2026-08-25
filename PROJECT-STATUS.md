@@ -1,6 +1,6 @@
 # Multiplayer FPS - Complete Project Status
 
-**Last Updated:** Checkpoint `93aef57` (Add keyboard movement controls)  
+**Last Updated:** Combat system (fire, hits, health, death until next round)  
 **Total Implementation Time So Far:** ~8-10 hours  
 **Estimated Remaining Time:** 10-18 hours (minimal) to 18-30 hours (full spec)
 
@@ -16,7 +16,7 @@
 ### Network & Protocol Layer
 - ✅ UDP nonblocking sockets (server on `127.0.0.1:34254`)
 - ✅ Message serialization with `serde` + `bincode`
-- ✅ Bidirectional messaging: `ClientMessage` enum (Join, Input, Ping) and `ServerMessage` enum (JoinAccepted/Rejected, Snapshot, LobbyState, Pong)
+- ✅ Bidirectional messaging: `ClientMessage` enum (Join, Input, Ping, Fire) and `ServerMessage` enum (JoinAccepted/Rejected, Snapshot, LobbyState, Pong, PlayerHit, PlayerDied)
 - ✅ Message encoding round-trip tested (unit tests passing)
 - ✅ Join request/response flow with duplicate name prevention
 
@@ -35,7 +35,7 @@
 - ✅ Maze type: `Maze { width, height, tiles }`
 - ✅ Spawn point lookup: `find_spawn()` returns safe floor tiles
 - ✅ Player collision detection: `move_player()` validates moves against walls
-- ✅ Player type: `Player { name, x, y }` (positions in world units)
+- ✅ Player type: `Player { name, x, y, health, alive, kills, deaths }`
 
 ### Graphics & Rendering
 - ✅ Macroquad window with keyboard input support
@@ -46,7 +46,7 @@
   - Perspective shading: darker walls at distance
   - Tested with unit tests (ray hits east wall at 2.5 units, north wall at 0.5 units)
 - ✅ Minimap display (18px tiles, offset rendering, player positions as circles)
-- ✅ HUD: FPS counter, player count, camera angle display
+- ✅ HUD: FPS counter, player count, camera angle, HP, death notice
 - ✅ First-person camera system with smooth rotation
 
 ### Client Input & Movement
@@ -54,14 +54,21 @@
 - ✅ Keyboard movement: **W/S** move forward/backward, **Q/E** strafe left/right
 - ✅ Movement is angle-aware: direction respects camera orientation
 - ✅ Input sent to server every 200ms with calculated `(change_x, change_y)`
+- ✅ Fire input: **Space** sends `ClientMessage::Fire { angle }` with the current camera angle
+- ✅ Server-authoritative hits: fire ray must reach another living player before a wall
+- ✅ Damage: 10 HP per hit, death at 0 HP; dead players cannot move or fire until the next round
 - ✅ Server validates all movement against maze walls before accepting
 
 ### Testing & Validation
-- ✅ 6 unit tests passing (4 in lib, 2 in client)
+- ✅ 11 unit tests passing (9 in lib, 2 in client)
   - Maze tile reading and modification
   - Spawn finding on floor tiles
   - Join message encoding/decoding
   - Ping/Pong encoding/decoding
+  - Fire message encoding/decoding
+  - Combat event encoding/decoding
+  - Raycast-to-player hit and wall-blocked miss
+  - Ten hits kill a player
   - Raycast direction accuracy (east and north walls)
 - ✅ `cargo check` passes with zero warnings
 - ✅ `cargo test` passes with zero failures
@@ -74,12 +81,12 @@
 ## 2. NOT YET IMPLEMENTED (Required for Basic Playability)
 
 ### Combat System
-- ❌ Fire mechanism (key press detection for shooting)
-- ❌ Raycast-to-player collision: detect when player's ray hits another player
-- ❌ Health tracking: `Player { health: u8 }` field
-- ❌ Damage model: hit = -10 HP, die at 0 HP
-- ❌ Death state: respawn on next round
-- ❌ Kill/death event tracking
+- ✅ Fire mechanism (Space sends `ClientMessage::Fire { angle }`)
+- ✅ Raycast-to-player collision: detect when player's ray hits another player
+- ✅ Health tracking: `Player { health: u8 }` field
+- ✅ Damage model: hit = -10 HP, die at 0 HP
+- ✅ Death state: respawn on next round
+- ✅ Kill/death event tracking
 
 ### Scoring & Statistics
 - ❌ Kill counter per player
@@ -170,7 +177,9 @@ Server receives:
 - Main loop: 60 FPS, key input → movement → network receive → render
 
 **common.rs**
-- `Player::new(name, x, y)`: constructor
+- `Player::new(name, x, y)`: constructor (100 HP, alive)
+- `Player::apply_hit()`: subtract 10 HP and mark death at 0
+- `raycast_to_player()`: march until wall; hit if within 0.5 of a target
 - `move_player(x, y, change_x, change_y)`: validate against walls
 - `is_wall(x, y)`: check if tile is passable
 - `find_spawn()`: locate safe spawn point
@@ -179,10 +188,13 @@ Server receives:
 - `ClientMessage::Join { username }`
 - `ClientMessage::Input { change_x, change_y }`
 - `ClientMessage::Ping { id }`
+- `ClientMessage::Fire { angle }`
 - `ServerMessage::JoinAccepted { player_id }`
-- `ServerMessage::Snapshot { player_id, x, y }`
+- `ServerMessage::Snapshot { player_id, x, y, health, alive }`
 - `ServerMessage::LobbyState { players, countdown }`
 - `ServerMessage::Pong { id }`
+- `ServerMessage::PlayerHit { shooter_id, target_id, health }`
+- `ServerMessage::PlayerDied { player_id, killer_id }`
 
 ---
 
@@ -406,17 +418,14 @@ Each checkpoint is stable and `cargo test` passes.
 
 ## 9. NEXT IMMEDIATE ACTION
 
-**Implement Phase 1A: Fire Mechanism**
+**Implement Phase 2: Scoring & match end**
 
 Steps:
-1. Add `Fire` variant to `ClientMessage` enum (includes angle)
-2. Add key check for `Space` in client input loop
-3. Send fire message every time Space is pressed
-4. Server receives fire message and logs it (no-op for now)
-5. Test: press Space, verify no crashes
-6. Commit: "Add fire mechanism (client-side input only)"
+1. Show kill/death totals on the HUD or a standings list
+2. Send `MatchOver` with standings when the match timer hits 0
+3. Optional: 5-second death respawn instead of waiting for the next round
 
-Estimated time: 30 minutes
+Estimated time: 1-2 hours
 
 ---
 

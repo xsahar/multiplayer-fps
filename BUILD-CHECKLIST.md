@@ -26,10 +26,12 @@ Status: `[x]` complete, `[~]` started but incomplete, `[ ]` not started.
 - [x] Keyboard camera rotation for the raycast view
 - [x] Minimap and FPS display
 - [x] Keyboard movement (W/S forward/back, Q/E strafe left/right) with angle-aware direction
+- [x] Fire mechanism (Space sends `ClientMessage::Fire { angle }`; server logs)
+- [x] Combat hits, health, death until next round, and kill/death events
 
 ### Next Session
 
-Implement combat mechanics: fire button, raycast-to-player collision detection, health tracking, and death state.
+Implement scoring and match end: kill/death HUD, standings, and win condition.
 
 ## How to Use This Guide
 
