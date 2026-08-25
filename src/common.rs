@@ -55,6 +55,15 @@ impl Player {
         self.health = MAX_HEALTH;
         self.alive = true;
     }
+
+    pub fn record_kill(&mut self) {
+        self.kills += 1;
+    }
+
+    pub fn reset_stats(&mut self) {
+        self.kills = 0;
+        self.deaths = 0;
+    }
 }
 
 /// Marches a ray until a wall and returns the closest living target within hit radius.

@@ -27,6 +27,9 @@ pub enum ServerMessage {
         health: u8,
     },
     PlayerDied { player_id: u32, killer_id: u32 },
+    MatchOver {
+        standings: Vec<(u32, u32, u32)>, // (player_id, kills, deaths)
+    },
 }
 
 #[cfg(test)]
