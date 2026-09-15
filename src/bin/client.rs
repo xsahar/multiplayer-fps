@@ -17,17 +17,17 @@ fn window_conf() -> Conf {
     }
 }
 
-// ====== THEME (Cyberpunk: neon magenta/cyan on deep purple-black) ======
-const UI_BG: Color = Color::new(0.03, 0.02, 0.07, 0.94);
-const UI_CARD: Color = Color::new(0.07, 0.04, 0.15, 0.96);
-const UI_ACCENT: Color = Color::new(1.00, 0.10, 0.65, 1.00); // neon magenta/pink
-const UI_ACCENT2: Color = Color::new(0.05, 0.95, 1.00, 1.00); // neon cyan
-const UI_TEXT: Color = Color::new(0.90, 0.97, 1.00, 1.00);
-const UI_TEXT_DIM: Color = Color::new(0.52, 0.62, 0.80, 1.00);
-const UI_BORDER: Color = Color::new(0.05, 0.90, 0.98, 1.00); // neon cyan
-const UI_SHADOW: Color = Color::new(0.00, 0.00, 0.00, 0.60);
-const UI_DANGER: Color = Color::new(1.00, 0.15, 0.40, 1.00);
-const UI_OK: Color = Color::new(0.15, 1.00, 0.75, 1.00);
+const UI_BG: Color = Color::new(0.05, 0.05, 0.06, 0.94);
+const UI_CARD: Color = Color::new(0.10, 0.10, 0.12, 0.96);
+const UI_ACCENT: Color = Color::new(1.00, 0.70, 0.00, 1.00); // glowing amber
+const UI_ACCENT2: Color = Color::new(1.00, 0.35, 0.00, 1.00); // deep orange
+const UI_TEXT: Color = Color::new(1.00, 0.95, 0.85, 1.00);
+const UI_TEXT_DIM: Color = Color::new(0.60, 0.55, 0.50, 1.00);
+const UI_BORDER: Color = Color::new(1.00, 0.70, 0.00, 1.00); // amber
+const UI_SHADOW: Color = Color::new(0.00, 0.00, 0.00, 0.70);
+const UI_DANGER: Color = Color::new(0.95, 0.15, 0.20, 1.00);
+const UI_OK: Color = Color::new(0.20, 0.85, 0.45, 1.00);
+
 
 #[inline]
 fn draw_shadow(rect: Rect, spread: f32) {
