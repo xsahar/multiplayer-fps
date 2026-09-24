@@ -720,6 +720,23 @@ async fn main() {
 
         let runtime = runtime.as_mut().expect("runtime created above");
         runtime.poll_server();
+
+        // 1. If no state has arrived from server yet, show a connecting screen
+        if runtime.state.is_none() {
+            clear_background(Color::new(0.08, 0.12, 0.15, 1.0));
+            let center_x = screen_width() * 0.5 - 200.0;
+            draw_text("MAZE WARS", center_x, 220.0, 44.0, WHITE);
+            draw_text("Connecting to server...", center_x, 300.0, 22.0, YELLOW);
+            draw_text("Press Q to cancel", center_x, 360.0, 18.0, LIGHTGRAY);
+            
+            if is_key_pressed(KeyCode::Q) {
+                std::process::exit(0);
+            }
+            next_frame().await;
+            continue;
+        }
+
+        // 2. If server sent a Waiting packet, display the lobby
         let waiting = runtime.state.as_ref().and_then(|state| match state {
             ServerMessage::Waiting {
                 connected,
@@ -730,6 +747,7 @@ async fn main() {
             } => Some((*connected, *required, *level, *vote, *seconds_left)),
             _ => None,
         });
+
         if let Some((connected, required, level, vote, seconds_left)) = waiting {
             runtime.move_value = 0.0;
             runtime.turn_value = 0.0;
@@ -738,6 +756,8 @@ async fn main() {
             next_frame().await;
             continue;
         }
+
+        // 3. Game in progress: process player inputs and draw maze
         runtime.update_input();
         if runtime.player_id.is_some() {
             runtime.send_input();
