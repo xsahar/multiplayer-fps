@@ -33,6 +33,9 @@ pub enum ServerMessage {
     Waiting {
         connected: usize,
         required: usize,
+        level: u8,
+        vote: u8,
+        seconds_left: u8,
     },
     Error(String),
 }

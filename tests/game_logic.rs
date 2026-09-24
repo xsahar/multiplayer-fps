@@ -24,7 +24,8 @@ fn protocol_round_trip_serializes() {
     };
 
     let encoded = bincode::serialize(&packet).unwrap();
-    let decoded: maze_wars::shared::protocol::ClientMessage = bincode::deserialize(&encoded).unwrap();
+    let decoded: maze_wars::shared::protocol::ClientMessage =
+        bincode::deserialize(&encoded).unwrap();
 
     match decoded {
         maze_wars::shared::protocol::ClientMessage::Hello {

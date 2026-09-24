@@ -98,8 +98,3 @@ Status: Not yet implemented
 
 Remaining audit validation focuses on:
 
-1. Remote client connection from another computer,
-2. Three-minute multiplayer session with as many clients as practical,
-3. Sustained multiplayer FPS and smoothness measurement.
-
-Until those features exist, the audit cannot be marked as fully complete.

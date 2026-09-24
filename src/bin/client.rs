@@ -147,6 +147,8 @@ struct ClientRuntime {
     move_value: f32,
     turn_value: f32,
     last_fps: f64,
+    fps_elapsed: f32,
+    fps_frames: u32,
     last_input: Instant,
     shot_flash_until: Option<Instant>,
 }
@@ -165,6 +167,8 @@ impl ClientRuntime {
             move_value: 0.0,
             turn_value: 0.0,
             last_fps: 0.0,
+            fps_elapsed: 0.0,
+            fps_frames: 0,
             last_input: Instant::now(),
             shot_flash_until: None,
         })
@@ -332,9 +336,11 @@ fn draw_maze_and_players(runtime: &ClientRuntime) {
         })
         .unwrap_or((0, 0));
 
-    let cell = 10.0;
-    let offset_x = 16.0;
-    let offset_y = 150.0;
+    let cell = 8.0;
+    let map_width = map.iter().map(Vec::len).max().unwrap_or(0) as f32 * cell;
+    let map_height = map.len() as f32 * cell;
+    let offset_x = (screen_width() - map_width - 16.0).max(16.0);
+    let offset_y = 48.0;
     let player_x = runtime
         .player_id
         .and_then(|_| runtime.state.as_ref())
@@ -382,6 +388,13 @@ fn draw_maze_and_players(runtime: &ClientRuntime) {
             Color::new(1.0, 0.65, 0.15, 0.8),
         );
     }
+    draw_rectangle(
+        offset_x - 6.0,
+        offset_y - 6.0,
+        map_width + 12.0,
+        map_height + 12.0,
+        Color::new(0.04, 0.07, 0.09, 0.92),
+    );
     for (y, row) in map.iter().enumerate() {
         for (x, cell_value) in row.iter().enumerate() {
             let px = offset_x + x as f32 * cell;
@@ -409,50 +422,58 @@ fn draw_maze_and_players(runtime: &ClientRuntime) {
         }
     }
 
-    draw_text("MAZE WARS", 20.0, 28.0, 30.0, WHITE);
+    draw_rectangle(12.0, 8.0, 220.0, 100.0, Color::new(0.04, 0.07, 0.09, 0.90));
+    draw_rectangle_lines(
+        12.0,
+        8.0,
+        220.0,
+        100.0,
+        2.0,
+        Color::new(0.35, 0.52, 0.58, 1.0),
+    );
+    draw_text("MAZE WARS", 24.0, 30.0, 26.0, WHITE);
     draw_text(
         &format!("Player: {}", runtime.username),
-        20.0,
+        24.0,
         55.0,
         18.0,
         WHITE,
     );
     draw_text(
         &format!("FPS: {:.1}", runtime.last_fps),
-        20.0,
+        24.0,
         78.0,
         18.0,
         WHITE,
     );
     draw_text(
         &format!("KILLS: {}  DEATHS: {}", kills, deaths),
-        20.0,
+        24.0,
         98.0,
-        16.0,
-        WHITE,
-    );
-    draw_text("MINIMAP", offset_x, offset_y - 12.0, 16.0, WHITE);
-    draw_text(
-        &format!("LEVEL {}", current_level),
-        offset_x + 72.0,
-        offset_y - 12.0,
         16.0,
         WHITE,
     );
     draw_text(
         "WASD move, SPACE/CLICK fire, Q quit",
-        20.0,
+        24.0,
         screen_height() - 20.0,
         18.0,
         WHITE,
     );
 }
 
-fn draw_waiting_screen(runtime: &ClientRuntime, connected: usize, required: usize) {
+fn draw_waiting_screen(
+    runtime: &ClientRuntime,
+    connected: usize,
+    required: usize,
+    level: u8,
+    vote: u8,
+    seconds_left: u8,
+) {
     clear_background(Color::new(0.08, 0.12, 0.15, 1.0));
     let center_x = screen_width() * 0.5 - 240.0;
     draw_text("MAZE WARS", center_x, 190.0, 44.0, WHITE);
-    draw_text("Waiting for another player", center_x, 270.0, 28.0, YELLOW);
+    draw_text("LOBBY", center_x, 270.0, 28.0, YELLOW);
     draw_text(
         &format!("Players connected: {} / {}", connected, required),
         center_x,
@@ -461,9 +482,24 @@ fn draw_waiting_screen(runtime: &ClientRuntime, connected: usize, required: usiz
         LIGHTGRAY,
     );
     draw_text(
-        "Keep this window open; the match starts automatically.",
+        &if vote == 0 {
+            format!("Your vote: not submitted  |  Default: level {}", level)
+        } else {
+            format!("Your vote: level {}  |  Default: level {}", vote, level)
+        },
         center_x,
-        370.0,
+        355.0,
+        18.0,
+        LIGHTGRAY,
+    );
+    draw_text(
+        &if connected < required {
+            "Waiting for another player".to_string()
+        } else {
+            format!("Match starts in {} seconds", seconds_left)
+        },
+        center_x,
+        400.0,
         18.0,
         WHITE,
     );
@@ -688,14 +724,17 @@ async fn main() {
             ServerMessage::Waiting {
                 connected,
                 required,
-            } => Some((*connected, *required)),
+                level,
+                vote,
+                seconds_left,
+            } => Some((*connected, *required, *level, *vote, *seconds_left)),
             _ => None,
         });
-        if let Some((connected, required)) = waiting {
+        if let Some((connected, required, level, vote, seconds_left)) = waiting {
             runtime.move_value = 0.0;
             runtime.turn_value = 0.0;
             runtime.send_input();
-            draw_waiting_screen(runtime, connected, required);
+            draw_waiting_screen(runtime, connected, required, level, vote, seconds_left);
             next_frame().await;
             continue;
         }
@@ -706,7 +745,13 @@ async fn main() {
 
         let dt = last_frame.elapsed().as_secs_f32();
         last_frame = Instant::now();
-        runtime.last_fps = if dt > 0.0 { 1.0 / dt as f64 } else { 0.0 };
+        runtime.fps_elapsed += dt;
+        runtime.fps_frames += 1;
+        if runtime.fps_elapsed >= 0.5 {
+            runtime.last_fps = runtime.fps_frames as f64 / runtime.fps_elapsed as f64;
+            runtime.fps_elapsed = 0.0;
+            runtime.fps_frames = 0;
+        }
 
         draw_maze_and_players(&runtime);
         next_frame().await;

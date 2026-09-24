@@ -8,13 +8,18 @@ use maze_wars::shared::player::Player;
 use maze_wars::shared::protocol::{ClientMessage, PlayerState, ServerMessage};
 use maze_wars::shared::world::{level_by_index, World};
 
+const LOBBY_DURATION_SECS: u64 = 20;
+
 pub struct Server {
     socket: UdpSocket,
     players: HashMap<SocketAddr, Player>,
     inputs: HashMap<SocketAddr, (f32, f32)>,
     last_seen: HashMap<SocketAddr, Instant>,
     last_shot: HashMap<SocketAddr, Instant>,
+    level_votes: HashMap<SocketAddr, u8>,
     level: u8,
+    lobby_deadline: Option<Instant>,
+    match_started: bool,
     tick: u64,
     next_id: u32,
 }
@@ -33,6 +38,27 @@ fn spawn_for_player(world: &World, player_id: u32, offset: u32) -> (f32, f32) {
     world.spawn_points[index]
 }
 
+fn select_level(votes: impl IntoIterator<Item = u8>, fallback: u8) -> u8 {
+    let mut counts = [0usize; 4];
+    for level in votes {
+        if (1..=3).contains(&level) {
+            counts[level as usize] += 1;
+        }
+    }
+    let highest = (1..=3)
+        .map(|level| counts[level as usize])
+        .max()
+        .unwrap_or(0);
+    let leaders: Vec<u8> = (1..=3)
+        .filter(|level| counts[*level as usize] == highest)
+        .collect();
+    if highest > 0 && leaders.len() == 1 {
+        leaders[0]
+    } else {
+        fallback
+    }
+}
+
 impl Server {
     pub fn new() -> std::io::Result<Self> {
         Self::new_with_addr("0.0.0.0:8080")
@@ -47,7 +73,10 @@ impl Server {
             inputs: HashMap::new(),
             last_seen: HashMap::new(),
             last_shot: HashMap::new(),
+            level_votes: HashMap::new(),
             level: 1,
+            lobby_deadline: None,
+            match_started: false,
             tick: 0,
             next_id: 1,
         })
@@ -79,6 +108,33 @@ impl Server {
         ServerMessage::Snapshot {
             tick: self.tick,
             players,
+        }
+    }
+
+    fn apply_level(&mut self, level: u8) {
+        self.level = level.clamp(1, 3);
+        let world = level_by_index(self.level);
+        for player in self.players.values_mut() {
+            let spawn = spawn_for_player(&world, player.id, 0);
+            player.level = self.level;
+            player.x = spawn.0;
+            player.y = spawn.1;
+            player.angle = 0.0;
+        }
+    }
+
+    fn waiting_message(&self, now: Instant, addr: SocketAddr) -> ServerMessage {
+        let seconds_left = self
+            .lobby_deadline
+            .map(|deadline| deadline.saturating_duration_since(now).as_secs())
+            .unwrap_or(0)
+            .min(u8::MAX as u64) as u8;
+        ServerMessage::Waiting {
+            connected: self.players.len(),
+            required: 2,
+            level: self.level,
+            vote: self.level_votes.get(&addr).copied().unwrap_or(0),
+            seconds_left,
         }
     }
 
@@ -188,6 +244,12 @@ impl Server {
                                     self.players.insert(addr, player.clone());
                                     self.inputs.insert(addr, (0.0, 0.0));
                                     self.last_seen.insert(addr, Instant::now());
+                                    if self.players.len() == 2 && self.lobby_deadline.is_none() {
+                                        self.lobby_deadline = Some(
+                                            Instant::now()
+                                                + Duration::from_secs(LOBBY_DURATION_SECS),
+                                        );
+                                    }
                                     let _ = self.send_to(
                                         addr,
                                         &ServerMessage::Welcome {
@@ -210,21 +272,20 @@ impl Server {
                                     self.last_seen.insert(addr, Instant::now());
                                 }
                                 ClientMessage::ChangeLevel { level } => {
-                                    self.level = level.clamp(1, 3);
-                                    let world = level_by_index(self.level);
-                                    for player in self.players.values_mut() {
-                                        let spawn = spawn_for_player(&world, player.id, 0);
-                                        player.level = self.level;
-                                        player.x = spawn.0;
-                                        player.y = spawn.1;
+                                    if self.players.contains_key(&addr) && !self.match_started {
+                                        self.level_votes.insert(addr, level.clamp(1, 3));
+                                        self.last_seen.insert(addr, Instant::now());
                                     }
-                                    self.last_seen.insert(addr, Instant::now());
                                 }
                                 ClientMessage::Disconnect => {
                                     self.players.remove(&addr);
                                     self.inputs.remove(&addr);
                                     self.last_seen.remove(&addr);
                                     self.last_shot.remove(&addr);
+                                    self.level_votes.remove(&addr);
+                                    if self.players.is_empty() {
+                                        self.lobby_deadline = None;
+                                    }
                                     println!("Disconnected client {}", addr);
                                 }
                             }
@@ -250,19 +311,44 @@ impl Server {
                     self.inputs.remove(&addr);
                     self.last_seen.remove(&addr);
                     self.last_shot.remove(&addr);
+                    self.level_votes.remove(&addr);
                 }
 
                 if self.players.len() < 2 {
-                    let waiting = ServerMessage::Waiting {
-                        connected: self.players.len(),
-                        required: 2,
-                    };
-                    let payload = bincode::serialize(&waiting).unwrap();
+                    if self.match_started {
+                        self.match_started = false;
+                        self.level_votes.clear();
+                        self.lobby_deadline = if self.players.is_empty() {
+                            None
+                        } else {
+                            Some(now + Duration::from_secs(LOBBY_DURATION_SECS))
+                        };
+                    }
                     for addr in self.players.keys().copied().collect::<Vec<_>>() {
+                        let waiting = self.waiting_message(now, addr);
+                        let payload = bincode::serialize(&waiting).unwrap();
                         let _ = self.socket.send_to(&payload, addr);
                     }
                     last_broadcast = Instant::now();
                     continue;
+                }
+
+                if !self.match_started {
+                    if !self.lobby_deadline.is_some_and(|deadline| now >= deadline) {
+                        for addr in self.players.keys().copied().collect::<Vec<_>>() {
+                            let waiting = self.waiting_message(now, addr);
+                            let payload = bincode::serialize(&waiting).unwrap();
+                            let _ = self.socket.send_to(&payload, addr);
+                        }
+                        last_broadcast = Instant::now();
+                        continue;
+                    }
+
+                    let selected_level =
+                        select_level(self.level_votes.values().copied(), self.level);
+                    self.apply_level(selected_level);
+                    self.match_started = true;
+                    self.lobby_deadline = None;
                 }
 
                 for (addr, player) in self.players.iter_mut() {
