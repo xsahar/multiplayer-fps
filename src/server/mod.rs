@@ -1,3 +1,3 @@
-pub mod game_server;
+pub mod app;
 
-pub use game_server::*;
+pub use app::Server;

@@ -1,5 +1,3 @@
-pub mod network;
-pub mod renderer;
+pub mod app;
 
-pub use network::*;
-pub use renderer::*;
+pub use app::Client;

@@ -1,64 +1,62 @@
-# Maze Wars
+Instructions
+Write your own version of the game maze wars. You should recreate all the elements of the game, but you have freedom to implement the user interface.
 
-A multiplayer, raycast-rendered (Wolfenstein-style) FPS set in procedurally generated mazes. Written in Rust with [macroquad](https://github.com/not-fl3/macroquad) for rendering and a custom UDP protocol for networking.
+Objectives
+User Interface
+The game should present a specific User Interface, in which the minimum requirements are:
 
-## Features
+A mini map where the player can see his own position and the whole "game world".
 
-- **Procedural mazes** — generated per-round with a randomized Prim's algorithm, then "braided" to knock out dead ends and add loops/shortcuts (`src/common/maze.rs`).
-- **Three difficulty levels** — `Easy` (23x15), `Normal` (39x27), `Hard` (55x37), plus map voting and a `Random` choice.
-- **Lobby → Match flow** — players join a lobby, vote on a map, and the match starts once the lobby timer runs out.
-- **Raycast renderer** — classic grid-based raycasting for walls, with sprite-based rendering for other players, fog, and a neon HUD.
-- **Live scoreboard** — kills, deaths, and score are tracked per player and broadcast every snapshot; a standings screen shows at match end.
-- **In-game chat and hit markers**, spawn protection, and ping/latency tracking.
+The graphics of the game (walls and other players) should be similar to the original game (see maze_wars for more details)
 
-## Project layout
+Finally you have to display the frame rate of the game on the screen.
 
-```
-src/
-├── bin/
-│   ├── client.rs      # client entry point, UI/menu, input handling
-│   └── server.rs      # server entry point (binds and runs GameServer)
-├── client/
-│   ├── network.rs     # UDP client: join, input, vote, chat, keepalive
-│   └── renderer.rs     # raycasting renderer, HUD, sprites
-├── server/
-│   └── game_server.rs # authoritative game loop, lobby/match state, hit detection
-└── common/
-    ├── protocol.rs    # wire types shared by client & server (bincode-serialized)
-    ├── maze.rs        # maze generation
-    └── player.rs      # server-side player state
-```
+Architecture
+Implement a client-server architecture where clients connect to a central server to play the game.
 
-## Networking
+Your implementation should allow one client and the server to run on the same machine, with other clients connecting from different machines.
 
-The client and server talk over UDP using `bincode`-encoded messages defined in `src/common/protocol.rs`:
+Use the UDP protocol to enable the communication between the clients and the server.
 
-- `ClientToServer`: `Join`, `Input`, `Vote`, `Ping`, `ReturnToLobby`, `ChatMessage`
-- `ServerToClient`: `JoinOk`, `JoinRejected`, `Snapshot`, `LevelChanged`, `LobbyState`, `MatchOver`, `HitConfirm`, `Pong`, `ServerFull`, `ChatMessage`
+The game should have at least 3 levels with increasing difficulty (with difficulty we mean, making the maze harder, with more dead ends).
 
-The server runs an authoritative simulation at `SERVER_TICK_HZ` (30 Hz) and broadcasts world snapshots at `SNAPSHOT_HZ` (20 Hz). Default port is `45000`, with up to `MAX_PLAYERS` (64) concurrent players.
+You will have to develop the game server and also a client application:
 
-## Building & running
+The server must accept as many connections as possible (the minimum should be 10).
 
-> **Note:** this checkout is missing a `Cargo.toml` (only `Cargo.lock` is present, listing the crate as `maze-wars` with dependencies on `anyhow`, `bincode`, `crossbeam-channel`, `macroquad`, `rand`, `serde`, and `thiserror`). Add a `Cargo.toml` declaring the two binaries (`src/bin/server.rs`, `src/bin/client.rs`) before these commands will work.
+When the client is initialized, the game should ask for:
 
-Run the server:
+The IP address of the server, allowing the client application to connect to any server.
 
-```sh
-cargo run --bin server
-# or specify a bind address:
-cargo run --bin server -- 0.0.0.0:45000
-# or via env var:
-MAZE_WARS_BIND=0.0.0.0:45000 cargo run --bin server
-```
+A username for identification.
 
-Run the client:
+After providing the above information, the game should start and open the graphical interface, allowing the player to join and start playing the game.
 
-```sh
-cargo run --bin client
-```
+Example: Assuming that you can connect to a server in the same computer.
 
-## Requirements
+$ cargo run
+Enter IP Address: 198.1.1.34:34254
+Enter Name: name
+Starting...
+$
+Performance
+The game should always have a frame rate above 50 fps (frames per second).
 
-- Rust (stable toolchain)
-- macroquad's platform dependencies (see [macroquad's README](https://github.com/not-fl3/macroquad) for OS-specific requirements, e.g. X11/Wayland dev libs on Linux)
+Bonus
+As bonus for this project here are some ideas:
+
+Implement a level editor to allow players to create their own mazes.
+
+Implement an algorithm that generates automatically new mazes.
+
+Implement A.I. players to allow playing the game without having to wait for more people to join to the server.
+
+For the basic implementation you can initialize the game from the command line. As a bonus you can implement the initialization of the game as part of the graphical interface and save a history of the hosts with an alias so it's easier to reconnect to known servers.
+
+This project will help you learn about:
+
+GUI applications
+
+Game mechanics
+
+UDP protocol
